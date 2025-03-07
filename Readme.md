@@ -1,4 +1,4 @@
-# Ros2Go2Estimator 🦾
+# Ros1Go2Estimator 🦾
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 - 一种高精度里程计解决方案，
@@ -28,13 +28,14 @@
 
 ## ⚙️ 安装指南
 ```bash
-git clone --recursive https://github.com/ShineMinxing/Ros2Go2Estimator.git
-cd Ros2Go2Estimator
-colcon build
-ros2 launch joystick_control joystick_control_launch.py
+git clone --recursive https://github.com/ShineMinxing/Ros1Go2Estimator.git
+cd Ros1Go2Estimator
+catkin_make
+source /opt/ros/noetic/setup.bash
+source ~/Ros1Go2Estimator/devel/setup.bash 
+roscore
+rosrun fusion_estimator fusion_estimator_node
 ```
-- 记得在src/joystick_control/launch/joystick_control_launch.py中，修改机器狗的网口名，我的是“enx00e04c8d0eff”。
-- 同时按下手柄的LT、RT，解锁/锁定手柄；按住RT+左摇杆进行移动；按住RT+右摇杆进行旋转；更多操作请看joystick_control_node.cpp。
 
 ## 📄 相关文档
 - 核心算法原理: [技术白皮书](https://github.com/ShineMinxing/FusionEstimation.git)
