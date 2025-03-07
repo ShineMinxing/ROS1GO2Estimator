@@ -1,71 +1,83 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.0.2)
 project(fusion_estimator)
 
-# 查找依赖
-find_package(ament_cmake REQUIRED)
-find_package(rclcpp REQUIRED)
-find_package(sensor_msgs REQUIRED)
-find_package(unitree_sdk2 REQUIRED)
-find_package(rosidl_default_generators REQUIRED)
-find_package(builtin_interfaces REQUIRED)
-find_package(urdfdom_headers REQUIRED)
-find_package(urdfdom REQUIRED)
-find_package(nav_msgs REQUIRED)
-find_package(tf2 REQUIRED)
-find_package(tf2_geometry_msgs REQUIRED)  
+## 编译选项：根据需要自行调整
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_BUILD_TYPE "Release")
 
-# 生成消息接口
-rosidl_generate_interfaces(${PROJECT_NAME}
-  "msg/FusionEstimatorTest.msg"
-  DEPENDENCIES builtin_interfaces
+## 查找 catkin 依赖包
+find_package(catkin REQUIRED COMPONENTS
+  roscpp
+  sensor_msgs
+  nav_msgs
+  tf
+  tf2
+  tf2_geometry_msgs
+  urdf
+  urdf_parser_plugin
+  message_generation
 )
 
-# 获取 src/Estimator 目录下的所有 .cpp
-file(GLOB_RECURSE ESTIMATOR_SOURCES
+## 如果你有自定义消息(.msg 文件)，在这定义:
+## 注意：如果你的包内还有 LowState.msg, RobotState.msg, JointState.msg 等，也要在这里列出
+add_message_files(
+  FILES
+  FusionEstimatorTest.msg
+  LowState.msg
+  JointState.msg
+)
+
+## 如果消息依赖其他消息/ROS包(例如 std_msgs, geometry_msgs, sensor_msgs 等)，在这里声明:
+generate_messages(
+  DEPENDENCIES
+  std_msgs
+  sensor_msgs
+  geometry_msgs
+  nav_msgs
+)
+
+## catkin_package 用于导出依赖和包含路径
+catkin_package(
+  CATKIN_DEPENDS
+    roscpp
+    sensor_msgs
+    nav_msgs
+    tf
+    tf2
+    tf2_geometry_msgs
+    urdf
+    message_runtime
+)
+
+## 搜索源文件，或者手动列出
+file(GLOB ESTIMATOR_SOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/*.c"
 )
 
-# 获取C++类型支持目标
-rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} "rosidl_typesupport_cpp")
-
-# 创建可执行文件
-add_executable(fusion_estimator_node ${ESTIMATOR_SOURCES})
-
-# 包含目录
-target_include_directories(fusion_estimator_node PRIVATE
-  ${rclcpp_INCLUDE_DIRS}
-  ${sensor_msgs_INCLUDE_DIRS}
-  ${unitree_sdk2_INCLUDE_DIRS}
-  ${CMAKE_CURRENT_BINARY_DIR}/rosidl_generator_cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/src
-  ${urdfdom_headers_INCLUDE_DIRS}
-  ${urdfdom_INCLUDE_DIRS}
+## 包含头文件路径
+include_directories(
+  ${catkin_INCLUDE_DIRS}
 )
 
-# 声明依赖
-ament_target_dependencies(fusion_estimator_node
-  rclcpp
-  sensor_msgs
-  nav_msgs
-  tf2
-  tf2_geometry_msgs
+## 创建可执行文件
+add_executable(${PROJECT_NAME}_node
+  ${ESTIMATOR_SOURCES}
 )
 
-# 链接库
-target_link_libraries(fusion_estimator_node
-  ${ament_LIBRARIES}
-  unitree_sdk2
-  ddsc ddscxx
-  ${cpp_typesupport_target}
-  ${urdfdom_LIBRARIES}
+## 链接库
+target_link_libraries(${PROJECT_NAME}_node
+  ${catkin_LIBRARIES}
 )
 
-# 安装目标
-install(TARGETS fusion_estimator_node
-  DESTINATION lib/${PROJECT_NAME}
+## 如果你的节点需要用到生成的消息头文件，需要加上依赖消息生成
+add_dependencies(${PROJECT_NAME}_node
+  ${${PROJECT_NAME}_EXPORTED_TARGETS}
+  ${catkin_EXPORTED_TARGETS}
 )
 
-# 导出依赖
-ament_export_dependencies(rosidl_default_runtime builtin_interfaces)
-ament_package()
+## 安装可执行文件到 devel / install 路径
+install(TARGETS
+  ${PROJECT_NAME}_node
+  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
