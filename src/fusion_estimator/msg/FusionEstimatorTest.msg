@@ -1,16 +1,11 @@
-# EstimatorTest.msg
 time stamp
-
-float64[12] Parameter
-
-float64[12] FeetBasedPosition
-float64[12] FeetBasedVelocity
-
-float64[9] EstimatedXYZ
-float64[9] EstimatedRPY
-
-float64[12] DataCheckA
-float64[12] DataCheckB
-float64[12] DataCheckC
-float64[12] DataCheckD
-float64[12] DataCheckE
+float64[20] others
+float64[12] feet_based_position
+float64[12] feet_based_velocity
+float64[9] estimated_xyz
+float64[9] estimated_rpy
+float64[12] data_check_a
+float64[12] data_check_b
+float64[12] data_check_c
+float64[12] data_check_d
+float64[12] data_check_e

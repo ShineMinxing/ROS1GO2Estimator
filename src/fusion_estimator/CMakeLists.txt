@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.0.2)
 project(fusion_estimator)
 
 ## 编译选项：根据需要自行调整
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_BUILD_TYPE "Release")
 
 ## 查找 catkin 依赖包
@@ -14,7 +14,6 @@ find_package(catkin REQUIRED COMPONENTS
   tf2
   tf2_geometry_msgs
   urdf
-  urdf_parser_plugin
   message_generation
 )
 
@@ -50,7 +49,7 @@ catkin_package(
 )
 
 ## 搜索源文件，或者手动列出
-file(GLOB ESTIMATOR_SOURCES
+file(GLOB_RECURSE ESTIMATOR_SOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/*.c"
 )
@@ -58,6 +57,7 @@ file(GLOB ESTIMATOR_SOURCES
 ## 包含头文件路径
 include_directories(
   ${catkin_INCLUDE_DIRS}
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
 ## 创建可执行文件

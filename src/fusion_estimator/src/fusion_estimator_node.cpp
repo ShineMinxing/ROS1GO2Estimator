@@ -1,14 +1,17 @@
 #include <ros/ros.h>
 #include <ros/package.h>
 #include <iostream>
+#include <filesystem>
 #include <iomanip>
 #include <fstream>
 #include <cmath>
 #include <functional>
 #include <urdf/model.h>
 #include <nav_msgs/Odometry.h>
+#include <tf/transform_datatypes.h>
+
+
 #include <fusion_estimator/LowState.h>
-#include <fusion_estimator/RobotState.h>
 #include <fusion_estimator/FusionEstimatorTest.h>
 
 #include "GO2FusionEstimator/Estimator/EstimatorPortN.h"
@@ -17,10 +20,11 @@
 
 using namespace DataFusion;
 
-class FusionEstimatorNode : public rclcpp::Node
+class FusionEstimatorNode
 {
 public:
-    explicit FusionEstimatorNode(ros::NodeHandle& nh) : nh_(nh)
+    explicit FusionEstimatorNode(ros::NodeHandle& nh, ros::NodeHandle& nh_private)
+
     {
         LowState_subscriber = nh.subscribe<fusion_estimator::LowState>(
             "/robot_description/anymal/low_state", 1, &FusionEstimatorNode::LowStateCallback, this
@@ -47,8 +51,6 @@ public:
 
     }
 
-    void ObtainParameter();
-
 private:
 
     void LowStateCallback(const fusion_estimator::LowState::ConstPtr &low_state)
@@ -57,19 +59,30 @@ private:
         fusion_estimator::FusionEstimatorTest fusion_msg;
         fusion_msg.stamp = ros::Time::now();
 
+        // 读取 RPY 需要从四元数转换
+        tf::Quaternion q;
+        tf::quaternionMsgToTF(low_state->imu.orientation, q);
+        double roll, pitch, yaw;
+        tf::Matrix3x3(q).getRPY(roll, pitch, yaw);
 
-        for(int i=0; i<3; i++){
-            fusion_msg.data_check_a[0+i] = low_state->imu_state().accelerometer()[i];
-            fusion_msg.data_check_a[3+i] = low_state->imu_state().rpy()[i];
-            fusion_msg.data_check_a[6+i] = low_state->imu_state().gyroscope()[i];
-        }
+        // 读取加速度
+        fusion_msg.data_check_a[0] = low_state->imu.linear_acceleration.x;
+        fusion_msg.data_check_a[1] = low_state->imu.linear_acceleration.y;
+        fusion_msg.data_check_a[2] = low_state->imu.linear_acceleration.z;
+        fusion_msg.data_check_a[3] = roll;
+        fusion_msg.data_check_a[4] = pitch;
+        fusion_msg.data_check_a[5] = yaw;
+        // 读取角速度
+        fusion_msg.data_check_a[6] = low_state->imu.angular_velocity.x;
+        fusion_msg.data_check_a[7] = low_state->imu.angular_velocity.y;
+        fusion_msg.data_check_a[8] = low_state->imu.angular_velocity.z;
 
         for(int LegNumber = 0; LegNumber<4; LegNumber++)
         {
             for(int i = 0; i < 3; i++)
             {
-                fusion_msg.data_check_b[LegNumber*3+i] = low_state->motor_state()[LegNumber*3+i].q();
-                fusion_msg.data_check_c[LegNumber*3+i] = low_state->motor_state()[LegNumber*3+i].dq();
+                fusion_msg.data_check_b[LegNumber*3+i] = low_state->joint_states[LegNumber*3+i].q;
+                fusion_msg.data_check_c[LegNumber*3+i] = low_state->joint_states[LegNumber*3+i].dq;
             }
         }
 
@@ -77,14 +90,12 @@ private:
         double LatestMessage[3][100]={0};
         static double LastMessage[3][100]={0};
 
-        rclcpp::Clock ros_clock(RCL_SYSTEM_TIME);
-        rclcpp::Time CurrentTime = ros_clock.now();
-        double CurrentTimestamp =  CurrentTime.seconds();
+        ros::Time CurrentTime = ros::Time::now();
+        double CurrentTimestamp = CurrentTime.toSec();
 
-        for(int i = 0; i < 3; i++)
-        {
-            LatestMessage[0][3*i+2] = low_state->imu_state().accelerometer()[i];
-        }
+        LatestMessage[0][3*0] = low_state->imu.linear_acceleration.x;
+        LatestMessage[0][3*1] = low_state->imu.linear_acceleration.y;
+        LatestMessage[0][3*2] = low_state->imu.linear_acceleration.z;
         for(int i = 0; i < 9; i++)
         {
             if(LastMessage[0][i] != LatestMessage[0][i])
@@ -97,18 +108,13 @@ private:
                 break;
             }
         }
-        for(int i=0; i<9; i++){
-            fusion_msg.estimated_xyz[i] = StateSpaceModel1_Sensors[0]->EstimatedState[i];
-        }
 
-        for(int i = 0; i < 3; i++)
-        {
-            LatestMessage[1][3*i] = low_state->imu_state().rpy()[i];
-        }
-        for(int i = 0; i < 3; i++)
-        {
-            LatestMessage[1][3*i+1] = low_state->imu_state().gyroscope()[i];
-        }
+        LatestMessage[1][3*0] = low_state->imu.linear_acceleration.x;
+        LatestMessage[1][3*1] = low_state->imu.linear_acceleration.y;
+        LatestMessage[1][3*2] = low_state->imu.linear_acceleration.z;
+        LatestMessage[1][3*0+1] = roll;
+        LatestMessage[1][3*1+1] = pitch;
+        LatestMessage[1][3*2+1] = yaw;
         for(int i = 0; i < 9; i++)
         {
             if(LastMessage[1][i] != LatestMessage[1][i])
@@ -121,20 +127,16 @@ private:
                 break;
             }
         }
-        for(int i=0; i<9; i++){
-            fusion_msg.estimated_rpy[i] = StateSpaceModel1_Sensors[1]->EstimatedState[i];
-        }
 
         for(int LegNumber = 0; LegNumber<4; LegNumber++)
         {
             for(int i = 0; i < 3; i++)
             {
-                LatestMessage[2][LegNumber*3+i] = low_state->motor_state()[LegNumber*3+i].q();
-                LatestMessage[2][12+ LegNumber*3+i] = low_state->motor_state()[LegNumber*3+i].dq();
+                LatestMessage[2][LegNumber*3+i] = low_state->joint_states[i].q;
+                LatestMessage[2][12+ LegNumber*3+i] = low_state->joint_states[i].dq;
             }
-            LatestMessage[2][24 + LegNumber] = low_state->foot_force()[LegNumber];
-            fusion_msg.others[LegNumber] = low_state->foot_force()[LegNumber];
-            fusion_msg.others[LegNumber] = fusion_msg.others[LegNumber];
+            LatestMessage[2][24 + LegNumber] = low_state->foot_force[LegNumber];
+            fusion_msg.others[LegNumber] = low_state->foot_force[LegNumber];
         }
         for(int i = 0; i < 28; i++)
         {
@@ -157,6 +159,13 @@ private:
             }
         }
 
+        for(int i=0; i<9; i++){
+            fusion_msg.estimated_xyz[i] = StateSpaceModel1_Sensors[0]->EstimatedState[i];
+        }
+        for(int i=0; i<9; i++){
+            fusion_msg.estimated_rpy[i] = StateSpaceModel1_Sensors[1]->EstimatedState[i];
+        }
+
         FETest_publisher.publish(fusion_msg);
 
         // 新增：构造标准 odometry 消息，并发布
@@ -171,12 +180,10 @@ private:
         SMXFE_odom.pose.pose.position.z = fusion_msg.estimated_xyz[6];
 
         // 使用 fusion_msg.estimated_rpy 的前 3 个元素（roll, pitch, yaw）转换为四元数
-        tf2::Quaternion q;
         q.setRPY(fusion_msg.estimated_rpy[0], fusion_msg.estimated_rpy[3], fusion_msg.estimated_rpy[6]);
-        SMXFE_odom.pose.pose.orientation = tf2::toMsg(q);
+        tf::quaternionTFToMsg(q, SMXFE_odom.pose.pose.orientation);
         // 发布 odometry 消息
-        SMXFE_publisher->publish(SMXFE_odom);
-
+        SMXFE_publisher.publish(SMXFE_odom);
     }
 
     void ObtainParameter()
@@ -200,8 +207,8 @@ private:
         // 读入文件内容
         std::string urdf_xml((std::istreambuf_iterator<char>(urdf_file)), std::istreambuf_iterator<char>());
         urdf_file.close();
-        urdf::ModelInterfaceSharedPtr model = urdf::parseURDF(urdf_xml);
-        if (!model)
+        urdf::Model model;
+        if (!model.initString(urdf_xml))
         {
             std::cout << "解析URDF失败: " << urdf_path << "，使用默认值。" << std::endl;
             return;
@@ -230,7 +237,7 @@ private:
             {
                 // 拼接完整关节名称，如 "FL_hip_joint"
                 std::string jointName = leg + "_" + jm.suffix;
-                urdf::JointConstSharedPtr joint = model->getJoint(jointName);
+                urdf::JointConstSharedPtr joint = model.getJoint(jointName);
                 if (!joint)
                 {
                     std::cout << "未找到关节: " << jointName << " (" << leg << ")，使用默认值: ";
@@ -248,7 +255,7 @@ private:
             }
             // 更新该腿 foot 连杆 collision 的球半径（存储在列 12）
             std::string footLinkName = leg + "_foot";
-            urdf::LinkConstSharedPtr footLink = model->getLink(footLinkName);
+            urdf::LinkConstSharedPtr footLink = model.getLink(footLinkName);
             if (!footLink)
             {
                 std::cout << "未找到连杆: " << footLinkName << " (" << leg << ")，使用默认值: " << Sensor_Legs->KinematicParams(i, 12) << std::endl;
@@ -276,7 +283,7 @@ private:
         // 获得IMU安装位置
         Eigen::Vector3d IMUPosition(-0.02557, 0, 0.04232);
         std::string jointName = "imu_joint";
-        urdf::JointConstSharedPtr joint = model->getJoint(jointName);
+        urdf::JointConstSharedPtr joint = model.getJoint(jointName);
         if (!joint)
         {
             std::cout << "未找到关节: " << jointName << ", 使用默认值： ";
@@ -298,9 +305,9 @@ private:
 
 
     // 传感器状态空间模型创建
-    ros::Subscriber Lowstate_subscriber;
+    ros::Subscriber LowState_subscriber;
     ros::Publisher FETest_publisher;
-    ros::PublisherSMXFE_publisher;
+    ros::Publisher SMXFE_publisher;
 
     std::vector<EstimatorPortN*> StateSpaceModel1_Sensors = {};// 容器声明
 
