@@ -30,8 +30,8 @@
 ```bash
 git clone --recursive https://github.com/ShineMinxing/Ros1Go2Estimator.git
 cd Ros1Go2Estimator
-catkin_make
 source /opt/ros/noetic/setup.bash
+catkin_make
 source ~/Ros1Go2Estimator/devel/setup.bash 
 roscore
 rosrun fusion_estimator fusion_estimator_node
