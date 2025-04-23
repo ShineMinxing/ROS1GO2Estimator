@@ -29,11 +29,10 @@ class FusionEstimatorNode
 public:
     explicit FusionEstimatorNode(ros::NodeHandle& nh, ros::NodeHandle& nh_private)
     {
-        // 通过参数获取网络接口名称，设置默认值为 "enx6c1ff714f043" 或其他有效接口
-        // nh_private.param<std::string>("network_interface", network_interface, "enx6c1ff714f043");
+        // 通过参数获取网络接口名称，设置默认值为 "1234abcd5678efg" 或其他有效接口
 
         // 初始化Unitree通道
-        unitree::robot::ChannelFactory::Instance()->Init(0, "enx6c1ff714f043");
+        unitree::robot::ChannelFactory::Instance()->Init(0, "1234abcd5678efg");
 
         // 订阅 Unitree LowState 数据
         Lowstate_subscriber.reset(new unitree::robot::ChannelSubscriber<unitree_go::msg::dds_::LowState_>("rt/lowstate"));

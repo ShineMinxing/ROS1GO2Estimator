@@ -3,6 +3,11 @@
 
 ## ⚙️ unitree_sdk2 编译
 
+在fusion_estimator_node.cpp中修改你的网卡地址
+```bash
+unitree::robot::ChannelFactory::Instance()->Init(0, "1234abcd5678efg");
+```
+然后执行
 ```bash
 cd src/Ros1Go2Estimator/unitree_sdk2
 mkdir build && cd build
