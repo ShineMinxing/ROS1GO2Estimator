@@ -4,6 +4,7 @@ project(fusion_estimator)
 ## 编译选项：根据需要自行调整
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_BUILD_TYPE "Release")
+set(unitree_sdk2_DIR "${CMAKE_SOURCE_DIR}/../unitree_sdk2/build/install/lib/cmake/unitree_sdk2")
 
 ## 查找 catkin 依赖包
 find_package(catkin REQUIRED COMPONENTS
@@ -15,6 +16,7 @@ find_package(catkin REQUIRED COMPONENTS
   tf2_geometry_msgs
   urdf
   message_generation
+  unitree_sdk2
 )
 
 ## 如果你有自定义消息(.msg 文件)，在这定义:
@@ -58,6 +60,7 @@ file(GLOB_RECURSE ESTIMATOR_SOURCES
 include_directories(
   ${catkin_INCLUDE_DIRS}
   ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${unitree_sdk2_INCLUDE_DIRS}
 )
 
 ## 创建可执行文件
@@ -68,6 +71,7 @@ add_executable(${PROJECT_NAME}_node
 ## 链接库
 target_link_libraries(${PROJECT_NAME}_node
   ${catkin_LIBRARIES}
+  unitree_sdk2
 )
 
 ## 如果你的节点需要用到生成的消息头文件，需要加上依赖消息生成
