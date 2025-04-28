@@ -10,6 +10,8 @@
 #include <nav_msgs/Odometry.h>
 #include <tf/transform_datatypes.h>
 
+#include "unitree/robot/channel/channel_subscriber.hpp" // cjsg added
+#include "unitree/idl/go2/LowState_.hpp" // cjsg added
 
 #include <fusion_estimator/LowState.h>
 #include <fusion_estimator/FusionEstimatorTest.h>
@@ -17,6 +19,8 @@
 #include "GO2FusionEstimator/Estimator/EstimatorPortN.h"
 #include "GO2FusionEstimator/Sensor_Legs.h" 
 #include "GO2FusionEstimator/Sensor_IMU.h" 
+#include <std_msgs/String.h>
+
 
 using namespace DataFusion;
 
@@ -24,15 +28,23 @@ class FusionEstimatorNode
 {
 public:
     explicit FusionEstimatorNode(ros::NodeHandle& nh, ros::NodeHandle& nh_private)
-
     {
-        LowState_subscriber = nh.subscribe<fusion_estimator::LowState>(
-            "/robot_description/anymal/low_state", 1, &FusionEstimatorNode::LowStateCallback, this
-        );
+        // 通过参数获取网络接口名称，设置默认值为 "1234abcd5678efg" 或其他有效接口
+
+        // 初始化Unitree通道
+        unitree::robot::ChannelFactory::Instance()->Init(0, "1234abcd5678efg");
+
+        // 订阅 Unitree LowState 数据
+        Lowstate_subscriber.reset(new unitree::robot::ChannelSubscriber<unitree_go::msg::dds_::LowState_>("rt/lowstate"));
+        Lowstate_subscriber->InitChannel(std::bind(&FusionEstimatorNode::LowStateCallback, this, std::placeholders::_1), 1);
+
+        // 订阅 ModeCmd # 500Hz, but not accurate
+        Mode_cmd_sub = nh.subscribe<std_msgs::String>(
+            "SMXFE/ModeCmd", 10, &FusionEstimatorNode::mode_cmd_callback, this);
 
         FETest_publisher = nh.advertise<fusion_estimator::FusionEstimatorTest>("fusion_estimator_data", 10);
-        SMXFE_publisher  = nh.advertise<nav_msgs::Odometry>("SMXFE_odom", 10);
-
+        SMXFE_publisher  = nh.advertise<nav_msgs::Odometry>("SMXFE_odom", 10); // 3d
+        // SMXFE_2D_publisher  = nh.advertise<nav_msgs::Odometry>("SMXFE/Odom_2D", 10);
 
         for(int i = 0; i < 2; i++)
         {
@@ -45,6 +57,11 @@ public:
         Sensor_IMUMagGyro = std::make_shared<DataFusion::SensorIMUMagGyro>(StateSpaceModel1_Sensors[1]);
         Sensor_Legs = std::make_shared<DataFusion::SensorLegs>(StateSpaceModel1_Sensors[0]);
 
+        // 获取动态参数
+        nh_private.param<double>("Modify_Par_1", modify_par_1, 0.0);
+        nh_private.param<double>("Modify_Par_2", modify_par_2, 0.0);
+        nh_private.param<double>("Modify_Par_3", modify_par_3, 0.0);
+
 
         ObtainParameter();
         ROS_INFO("Fusion Estimator Node Initialized (ROS1).");
@@ -53,36 +70,67 @@ public:
 
 private:
 
-    void LowStateCallback(const fusion_estimator::LowState::ConstPtr &low_state)
+
+    unitree::robot::ChannelSubscriberPtr<unitree_go::msg::dds_::LowState_> Lowstate_subscriber;
+
+    ros::Subscriber Mode_cmd_sub;
+    std::string network_interface;
+
+    // 传感器状态空间模型创建
+    // ros::Subscriber LowState_subscriber;
+    ros::Publisher FETest_publisher;
+    ros::Publisher SMXFE_publisher;
+
+    // 传感器状态空间模型创建
+    std::vector<EstimatorPortN*> StateSpaceModel1_Sensors = {};// 容器声明
+    std::vector<EstimatorPortN*> StateSpaceModel2_Sensors = {};// 容器声明
+
+    std::shared_ptr<DataFusion::SensorIMUAcc> Sensor_IMUAcc; 
+    std::shared_ptr<DataFusion::SensorIMUMagGyro> Sensor_IMUMagGyro; 
+    std::shared_ptr<DataFusion::SensorLegs> Sensor_Legs; 
+
+    double modify_par_1 = 0.0;
+    double modify_par_2 = 0.0;
+    double modify_par_3 = 0.0;
+
+    // 回调函数，处理SportCmd消息
+    void mode_cmd_callback(const std_msgs::String::ConstPtr& msg)
     {
+        if (msg->data == "Estimator_Position_Reset")
+        {
+            for(int i=0; i<4; i++)
+            {
+                Sensor_Legs->FootfallPositionRecordIsInitiated[i] = 0;
+            }
+            StateSpaceModel1_Sensors[0]->EstimatedState[0] = 0;
+            StateSpaceModel1_Sensors[0]->EstimatedState[3] = 0;
+            StateSpaceModel1_Sensors[0]->EstimatedState[6] = 0;
+            ROS_INFO("Received Estimator Position Reset command");
+        }
+    }
+
+    void LowStateCallback(const void* message)
+    {
+
+        // 接收LowState数据
+        const auto& low_state = *(unitree_go::msg::dds_::LowState_*)message;
+
         // 创建自定义消息对象
         fusion_estimator::FusionEstimatorTest fusion_msg;
         fusion_msg.stamp = ros::Time::now();
 
-        // 读取 RPY 需要从四元数转换
-        tf::Quaternion q;
-        tf::quaternionMsgToTF(low_state->imu.orientation, q);
-        double roll, pitch, yaw;
-        tf::Matrix3x3(q).getRPY(roll, pitch, yaw);
-
-        // 读取加速度
-        fusion_msg.data_check_a[0] = low_state->imu.linear_acceleration.x;
-        fusion_msg.data_check_a[1] = low_state->imu.linear_acceleration.y;
-        fusion_msg.data_check_a[2] = low_state->imu.linear_acceleration.z;
-        fusion_msg.data_check_a[3] = roll;
-        fusion_msg.data_check_a[4] = pitch;
-        fusion_msg.data_check_a[5] = yaw;
-        // 读取角速度
-        fusion_msg.data_check_a[6] = low_state->imu.angular_velocity.x;
-        fusion_msg.data_check_a[7] = low_state->imu.angular_velocity.y;
-        fusion_msg.data_check_a[8] = low_state->imu.angular_velocity.z;
+        for(int i=0; i<3; i++){
+            fusion_msg.data_check_a[0+i] = low_state.imu_state().accelerometer()[i]; // a
+            fusion_msg.data_check_a[3+i] = low_state.imu_state().rpy()[i];           // rpy
+            fusion_msg.data_check_a[6+i] = low_state.imu_state().gyroscope()[i];     // omega
+        }
 
         for(int LegNumber = 0; LegNumber<4; LegNumber++)
         {
             for(int i = 0; i < 3; i++)
             {
-                fusion_msg.data_check_b[LegNumber*3+i] = low_state->joint_states[LegNumber*3+i].q;
-                fusion_msg.data_check_c[LegNumber*3+i] = low_state->joint_states[LegNumber*3+i].dq;
+                fusion_msg.data_check_b[LegNumber*3+i] = low_state.motor_state()[LegNumber*3+i].q();
+                fusion_msg.data_check_c[LegNumber*3+i] = low_state.motor_state()[LegNumber*3+i].dq();
             }
         }
 
@@ -93,9 +141,11 @@ private:
         ros::Time CurrentTime = ros::Time::now();
         double CurrentTimestamp = CurrentTime.toSec();
 
-        LatestMessage[0][3*0] = low_state->imu.linear_acceleration.x;
-        LatestMessage[0][3*1] = low_state->imu.linear_acceleration.y;
-        LatestMessage[0][3*2] = low_state->imu.linear_acceleration.z;
+        for(int i = 0; i < 3; i++)
+        {
+            LatestMessage[0][3*i+2] = low_state.imu_state().accelerometer()[i];
+        }
+
         for(int i = 0; i < 9; i++)
         {
             if(LastMessage[0][i] != LatestMessage[0][i])
@@ -109,12 +159,19 @@ private:
             }
         }
 
-        LatestMessage[1][3*0] = low_state->imu.linear_acceleration.x;
-        LatestMessage[1][3*1] = low_state->imu.linear_acceleration.y;
-        LatestMessage[1][3*2] = low_state->imu.linear_acceleration.z;
-        LatestMessage[1][3*0+1] = roll;
-        LatestMessage[1][3*1+1] = pitch;
-        LatestMessage[1][3*2+1] = yaw;
+        for(int i=0; i<9; i++){
+            fusion_msg.estimated_xyz[i] = StateSpaceModel1_Sensors[0]->EstimatedState[i];
+        }
+
+        for(int i = 0; i < 3; i++)
+        {
+            LatestMessage[1][3*i] = low_state.imu_state().rpy()[i];
+        }
+        for(int i = 0; i < 3; i++)
+        {
+            LatestMessage[1][3*i+1] = low_state.imu_state().gyroscope()[i];
+        }
+
         for(int i = 0; i < 9; i++)
         {
             if(LastMessage[1][i] != LatestMessage[1][i])
@@ -128,15 +185,20 @@ private:
             }
         }
 
+        for(int i=0; i<9; i++){
+            fusion_msg.estimated_rpy[i] = StateSpaceModel1_Sensors[1]->EstimatedState[i];
+        }
+
         for(int LegNumber = 0; LegNumber<4; LegNumber++)
         {
             for(int i = 0; i < 3; i++)
             {
-                LatestMessage[2][LegNumber*3+i] = low_state->joint_states[i].q;
-                LatestMessage[2][12+ LegNumber*3+i] = low_state->joint_states[i].dq;
+                LatestMessage[2][LegNumber*3+i] = low_state.motor_state()[LegNumber*3+i].q();
+                LatestMessage[2][12+ LegNumber*3+i] = low_state.motor_state()[LegNumber*3+i].dq();
             }
-            LatestMessage[2][24 + LegNumber] = low_state->foot_force[LegNumber];
-            fusion_msg.others[LegNumber] = low_state->foot_force[LegNumber];
+            LatestMessage[2][24 + LegNumber] = low_state.foot_force()[LegNumber];
+            fusion_msg.others[LegNumber] = low_state.foot_force()[LegNumber];
+            fusion_msg.others[LegNumber] = fusion_msg.others[LegNumber];
         }
         for(int i = 0; i < 28; i++)
         {
@@ -159,29 +221,65 @@ private:
             }
         }
 
-        for(int i=0; i<9; i++){
-            fusion_msg.estimated_xyz[i] = StateSpaceModel1_Sensors[0]->EstimatedState[i];
-        }
-        for(int i=0; i<9; i++){
-            fusion_msg.estimated_rpy[i] = StateSpaceModel1_Sensors[1]->EstimatedState[i];
-        }
-
         FETest_publisher.publish(fusion_msg);
 
         // 新增：构造标准 odometry 消息，并发布
         nav_msgs::Odometry SMXFE_odom;
         SMXFE_odom.header.stamp = fusion_msg.stamp;
-        SMXFE_odom.header.frame_id = "SMXFE_odom";
-        SMXFE_odom.child_frame_id = "GO2_SMXFEodom";
+        SMXFE_odom.header.frame_id = "odom";
+        SMXFE_odom.child_frame_id = "base_link";
 
         // 使用 fusion_msg.estimated_xyz 的前 3 个元素作为位置
         SMXFE_odom.pose.pose.position.x = fusion_msg.estimated_xyz[0];
         SMXFE_odom.pose.pose.position.y = fusion_msg.estimated_xyz[3];
         SMXFE_odom.pose.pose.position.z = fusion_msg.estimated_xyz[6];
 
+
+        // 读取 RPY 需要从四元数转换
+        tf::Quaternion q;
         // 使用 fusion_msg.estimated_rpy 的前 3 个元素（roll, pitch, yaw）转换为四元数
         q.setRPY(fusion_msg.estimated_rpy[0], fusion_msg.estimated_rpy[3], fusion_msg.estimated_rpy[6]);
+        
+        // this one ???????????????????????????????
         tf::quaternionTFToMsg(q, SMXFE_odom.pose.pose.orientation);
+
+        // 线速度：使用 fusion_msg.estimated_xyz 的索引 1, 4, 7
+        SMXFE_odom.twist.twist.linear.x = fusion_msg.estimated_xyz[1];
+        SMXFE_odom.twist.twist.linear.y = fusion_msg.estimated_xyz[4];
+        SMXFE_odom.twist.twist.linear.z = fusion_msg.estimated_xyz[7];
+
+        // 角速度：使用 fusion_msg.estimated_rpy 的索引 1, 4, 7
+        SMXFE_odom.twist.twist.angular.x = fusion_msg.estimated_rpy[1];
+        SMXFE_odom.twist.twist.angular.y = fusion_msg.estimated_rpy[4];
+        SMXFE_odom.twist.twist.angular.z = fusion_msg.estimated_rpy[7];
+
+        // 设置位姿（pose）协方差：6x6 矩阵（行优先排列）
+        // 初始化全部置零
+        for (int i = 0; i < 36; ++i) {
+            SMXFE_odom.pose.covariance[i] = 0.0;
+        }
+        // 位置 (x, y, z) 的协方差设为 0.01
+        SMXFE_odom.pose.covariance[0]  = 0.1;   // x
+        SMXFE_odom.pose.covariance[7]  = 0.1;   // y
+        SMXFE_odom.pose.covariance[14] = 0.1;   // z
+        // 姿态（roll, pitch, yaw）的协方差设为 0.0001
+        SMXFE_odom.pose.covariance[21] = 0.1; // roll
+        SMXFE_odom.pose.covariance[28] = 0.1; // pitch
+        SMXFE_odom.pose.covariance[35] = 0.1; // yaw
+
+        // 设置 twist 协方差：6x6 矩阵（行优先排列）
+        for (int i = 0; i < 36; ++i) {
+            SMXFE_odom.twist.covariance[i] = 0.0;
+        }
+        // 线速度 (x, y, z) 的协方差设为 0.1
+        SMXFE_odom.twist.covariance[0]  = 0.1;   // linear x
+        SMXFE_odom.twist.covariance[7]  = 0.1;   // linear y
+        SMXFE_odom.twist.covariance[14] = 0.1;   // linear z
+        // 角速度 (x, y, z) 的协方差设为 0.01
+        SMXFE_odom.twist.covariance[21] = 0.1;  // angular x
+        SMXFE_odom.twist.covariance[28] = 0.1;  // angular y
+        SMXFE_odom.twist.covariance[35] = 0.1;  // angular z
+
         // 发布 odometry 消息
         SMXFE_publisher.publish(SMXFE_odom);
     }
@@ -216,7 +314,7 @@ private:
         // 设置输出格式：固定小数点，保留四位小数
         std::cout << std::fixed << std::setprecision(4);
         // 定义腿名称顺序，与 KinematicParams 的行对应
-        std::vector<std::string> legs = {"FL", "FR", "RL", "RR"};
+        std::vector<std::string> legs = {"FL", "FR", "RL", "RR"}; // 这个顺序对么？
         // 定义关节映射结构，每个关节在 13 维向量中的起始列号（每个关节占 3 列）
         struct JointMapping {
             std::string suffix; // 关节后缀，如 "hip_joint"
@@ -302,18 +400,6 @@ private:
         Sensor_IMUMagGyro->SensorPosition[1] = IMUPosition(1);
         Sensor_IMUMagGyro->SensorPosition[2] = IMUPosition(2);
     }
-
-
-    // 传感器状态空间模型创建
-    ros::Subscriber LowState_subscriber;
-    ros::Publisher FETest_publisher;
-    ros::Publisher SMXFE_publisher;
-
-    std::vector<EstimatorPortN*> StateSpaceModel1_Sensors = {};// 容器声明
-
-    std::shared_ptr<DataFusion::SensorIMUAcc> Sensor_IMUAcc; 
-    std::shared_ptr<DataFusion::SensorIMUMagGyro> Sensor_IMUMagGyro; 
-    std::shared_ptr<DataFusion::SensorLegs> Sensor_Legs; 
 
 };
 

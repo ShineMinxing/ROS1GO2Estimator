@@ -1,11 +1,44 @@
 # Ros1Go2Estimator 🦾
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-只成功编译过，没有实机测试，需要根据ROS2GO2Estimator的fusion_estimator_node.cpp，自行修改信号的输入输出
+## ⚙️ unitree_sdk2 编译
+
+在fusion_estimator_node.cpp中修改你的网卡地址
+```bash
+unitree::robot::ChannelFactory::Instance()->Init(0, "1234abcd5678efg");
+```
+然后执行
+```bash
+cd src/Ros1Go2Estimator/unitree_sdk2
+mkdir build && cd build
+cmake .. -DCMAKE_INSTALL_PREFIX=install
+make -j4
+make install
+```
+(下面是原理解释，一直到下一节都不需要再操作了)
+编译出3个cmake文件
+```bash
+unitree_sdk2Config.cmake
+unitree_sdk2ConfigVersion.cmake
+unitree_sdk2Targets.cmake
+```
+
+然后放在fusion_estimator的CMakeList中
+
+```bash
+set(unitree_sdk2_DIR "${CMAKE_SOURCE_DIR}/../unitree_sdk2/build/install/lib/cmake/unitree_sdk2")
+```
+
+同时参考ros2版本的unitree_sdk2位置插入
+```bash
+find_package unitree_sdk2
+include_directories ${unitree_sdk2_INCLUDE_DIRS}
+target_link_libraries unitree_sdk2
+```
 
 ## ⚙️ 安装指南
 ```bash
-git clone --recursive https://github.com/ShineMinxing/Ros1Go2Estimator.git
+git clone https://github.com/ShineMinxing/Ros1Go2Estimator.git
 cd Ros1Go2Estimator
 source /opt/ros/noetic/setup.bash
 catkin_make
